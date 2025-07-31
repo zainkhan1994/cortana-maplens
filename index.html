@@ -10,203 +10,194 @@
         padding: 0;
         font-family: sans-serif;
       }
-      #controls {
+
+      #controls, #upload-container {
         text-align: center;
         padding: 10px;
       }
-      #map {
-        height: 90vh;
-        width: 100%;
-      }
-      #controls button {
+
+      #controls button, #exportGeoJSON {
         margin: 4px;
         padding: 6px 10px;
         font-size: 14px;
         cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
       }
-      #controls img {
-        vertical-align: middle;
+
+      #map {
+        height: 75vh;
+        width: 100%;
+      }
+
+      #sidebar {
+        height: 25vh;
+        overflow-y: auto;
+        background: #f1f1f1;
+        padding: 10px;
+        font-size: 13px;
+      }
+
+      #loading {
+        display: none;
+        text-align: center;
       }
     </style>
+    <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
   </head>
   <body>
-    <div id="controls" style="text-align: center; padding: 10px;">
+    <div id="controls">
       <button onclick="filterMarkers('All')">All</button>
       <button onclick="filterMarkers('Health')">Health</button>
       <button onclick="filterMarkers('Personal')">Personal</button>
       <button onclick="filterMarkers('Work')">Work</button>
+      <button onclick="groupByTime('month')">Group by Month</button>
+      <button onclick="groupByTime('year')">Group by Year</button>
+      <button id="exportGeoJSON" onclick="exportGeoJSON()">Export Filtered GeoJSON</button>
+      <button onclick="resetMap()">Reset View</button>
     </div>
-    <div style="text-align: center; margin-bottom: 10px;">
-      <label>
-        Category:
-        <select id="categorySelect">
-          <option value="Health">Health</option>
-          <option value="Personal">Personal</option>
-          <option value="Work">Work</option>
-        </select>
-      </label>
-      <input id="markerTitle" type="text" placeholder="Title" />
-      <input id="markerDesc" type="text" placeholder="Description" />
-      <button onclick="enableDropMode()">Start Placing</button>
+
+    <div id="upload-container">
+      <label for="fileInput">Upload Google Timeline JSON:</label>
+      <input type="file" id="fileInput" accept=".json" />
     </div>
 
     <div id="map"></div>
+    <div id="sidebar">Timeline Summary will appear here...</div>
+    <div id="loading">Loading...</div>
 
     <script>
-      let map;
-      let allMarkers = [];
-      let dropMode = false;
+      let map, clusterer, allMarkers = [], filteredMarkers = [];
+
+      function formatDate(dateStr) {
+        const d = new Date(dateStr);
+        if (isNaN(d)) return dateStr;
+        const options = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' };
+        return d.toLocaleString('en-US', options);
+      }
+
+      function createMarker(lat, lng, title, info, timestamp) {
+        const marker = new google.maps.Marker({
+          position: { lat, lng },
+          title,
+        });
+
+        marker.metadata = { timestamp };
+
+        const infowindow = new google.maps.InfoWindow({ content: info });
+        marker.addListener("click", () => infowindow.open(map, marker));
+        allMarkers.push(marker);
+        return marker;
+      }
+
+      function filterMarkers(type) {
+        if (!clusterer) return;
+        clusterer.clearMarkers();
+        filteredMarkers = type === 'All'
+          ? [...allMarkers]
+          : allMarkers.filter(m => m.getTitle().includes(type));
+        clusterer.addMarkers(filteredMarkers);
+
+        // Show count in sidebar
+        document.getElementById("sidebar").innerHTML = 
+          `<strong>${filteredMarkers.length} marker(s) visible</strong>`;
+      }
+
+      function exportGeoJSON() {
+        const geojson = {
+          type: "FeatureCollection",
+          features: filteredMarkers.map(m => ({
+            type: "Feature",
+            geometry: {
+              type: "Point",
+              coordinates: [m.getPosition().lng(), m.getPosition().lat()],
+            },
+            properties: {
+              title: m.getTitle(),
+              timestamp: m.metadata?.timestamp || null,
+            }
+          }))
+        };
+
+        const blob = new Blob([JSON.stringify(geojson)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'filtered_markers.geojson';
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+
+      function groupByTime(type) {
+        const grouped = {};
+        for (const marker of allMarkers) {
+          const d = new Date(marker.metadata.timestamp);
+          const key = type === 'month' ? `${d.getFullYear()}-${d.getMonth()+1}` : `${d.getFullYear()}`;
+          grouped[key] = (grouped[key] || 0) + 1;
+        }
+        const summary = Object.entries(grouped)
+          .map(([k, v]) => `${k}: ${v} markers`).join('<br>');
+        document.getElementById("sidebar").innerHTML = summary;
+      }
 
       function initMap() {
-        const center = { lat: 29.7604, lng: -95.3698 }; // Houston
         map = new google.maps.Map(document.getElementById("map"), {
-          center: center,
-          zoom: 12,
+          zoom: 11,
+          center: { lat: 29.7355, lng: -95.4679 }
         });
+        clusterer = new markerClusterer.MarkerClusterer({ map });
+      }
 
-        // Load markers from JSON
-        fetch("markers.json")
-          .then((response) => response.json())
-          .then((data) => {
-            data.forEach((item) => {
-              const marker = new google.maps.Marker({
-                position: { lat: item.lat, lng: item.lng },
-                map: map,
-                title: item.title,
-                icon: {
-                  url: item.icon,
-                  scaledSize: new google.maps.Size(40, 40)
-                },
-                animation: google.maps.Animation.DROP
-              });
-
-              const infoWindow = new google.maps.InfoWindow({
-                content: `
-                  <div style="min-width: 150px;">
-                    <h4>${item.title}</h4>
-                    <p><strong>Category:</strong> ${item.category}</p>
-                    <p>${item.description}</p>
-                  </div>
-                `
-              });
-
-              marker.addListener("click", () => {
-                infoWindow.open(map, marker);
-              });
-
-              marker.category = item.category;
-              allMarkers.push(marker);
-            });
-          })
-          .catch((error) => {
-            console.error("Failed to load markers:", error);
-          });
-
-        // Show current location
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition((position) => {
-            const userLocation = {
-              lat: position.coords.latitude,
-              lng: position.coords.longitude,
-            };
-            new google.maps.Marker({
-              position: userLocation,
-              map: map,
-              title: "You are here",
-              icon: "https://maps.google.com/mapfiles/ms/icons/yellow-dot.png",
-            });
-          });
+      function resetMap() {
+        filterMarkers('All');
+        if (allMarkers.length) {
+          let bounds = new google.maps.LatLngBounds();
+          allMarkers.forEach(marker => bounds.extend(marker.getPosition()));
+          map.fitBounds(bounds);
         }
+      }
 
-        map.addListener("click", (e) => {
-          if (!dropMode) return;
-
-          const lat = e.latLng.lat();
-          const lng = e.latLng.lng();
-          const title = document.getElementById("markerTitle").value || "Untitled";
-          const description = document.getElementById("markerDesc").value || "";
-          const category = getSelectedCategory();
-          const icon = getIconForCategory(category);
-
-          const newMarker = new google.maps.Marker({
-            position: { lat, lng },
-            map: map,
-            title,
-            icon: {
-              url: icon,
-              scaledSize: new google.maps.Size(40, 40)
+      document.getElementById("fileInput").addEventListener("change", function (event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function (e) {
+          try {
+            document.getElementById("loading").style.display = "block";
+            const data = JSON.parse(e.target.result);
+            const slice = data.slice(0, 200);
+            for (const entry of slice) {
+              let coords, title, timestamp = entry.startTime;
+              if (entry.visit?.topCandidate?.placeLocation?.startsWith("geo:")) {
+                const [lat, lng] = entry.visit.topCandidate.placeLocation.replace("geo:", "").split(",").map(Number);
+                coords = { lat, lng };
+                title = `Visit: ${entry.visit.topCandidate.semanticType || "Unknown"}`;
+              } else if (entry.activity?.end?.startsWith("geo:")) {
+                const [lat, lng] = entry.activity.end.replace("geo:", "").split(",").map(Number);
+                coords = { lat, lng };
+                title = "Activity";
+              }
+              if (coords) {
+                const info = `<strong>${title}</strong><br>${formatDate(entry.startTime)} → ${formatDate(entry.endTime || '')}`;
+                const m = createMarker(coords.lat, coords.lng, title, info, entry.startTime);
+              }
             }
-          });
+            filterMarkers('All');
 
-          const infoWindow = new google.maps.InfoWindow({
-            content: `
-              <div style="min-width: 150px;">
-                <h4>${title}</h4>
-                <p><strong>Category:</strong> ${category}</p>
-                <p>${description}</p>
-                <p style="font-size: 12px;"><strong>Lat:</strong> ${lat.toFixed(4)}, <strong>Lng:</strong> ${lng.toFixed(4)}</p>
-              </div>
-            `
-          });
-
-          newMarker.addListener("click", () => {
-            infoWindow.open(map, newMarker);
-          });
-
-          allMarkers.push(newMarker);
-          dropMode = false;
-
-          // Copy to clipboard as JSON
-          const markerData = {
-            lat,
-            lng,
-            title,
-            category,
-            icon,
-            description
-          };
-          navigator.clipboard.writeText(JSON.stringify(markerData, null, 2)).then(() => {
-            alert("Marker data copied to clipboard. Paste it into markers.json");
-          });
-        });
-      }
-
-      function filterMarkers(category) {
-        allMarkers.forEach((marker) => {
-          if (category === "All" || marker.category === category) {
-            marker.setMap(map);
-          } else {
-            marker.setMap(null);
+            if (allMarkers.length) {
+              let bounds = new google.maps.LatLngBounds();
+              allMarkers.forEach(marker => bounds.extend(marker.getPosition()));
+              map.fitBounds(bounds);
+            }
+          } catch (err) {
+            alert("Failed to parse timeline JSON");
+            console.error(err);
+          } finally {
+            document.getElementById("loading").style.display = "none";
           }
-        });
-      }
-
-      function enableDropMode() {
-        dropMode = true;
-        alert("Click on the map to place a marker.");
-      }
-
-      function getSelectedCategory() {
-        return document.getElementById("categorySelect").value;
-      }
-
-      function getIconForCategory(category) {
-        const iconMap = {
-          Health: "icons/health.png",
-          Personal: "icons/personal.png",
-          Work: "icons/work.png"
         };
-        return iconMap[category] || "icons/default.png";
-      }
+        reader.readAsText(file);
+      });
     </script>
 
-    <script
-      src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAzQApeuUzO9ji6hRsJuNw0UFOg48btRoE&callback=initMap"
-      async
-      defer
-    ></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAzQApeuUzO9ji6hRsJuNw0UFOg48btRoE&callback=initMap" async defer></script>
   </body>
 </html>
