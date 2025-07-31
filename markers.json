@@ -1,0 +1,34 @@
+[
+  {
+    "lat": 29.7604,
+    "lng": -95.3698,
+    "title": "Quest Diagnostics",
+    "category": "Health",
+    "icon": "icons/health.png",
+    "description": "Lab and bloodwork facility I visit quarterly."
+  },
+  {
+    "lat": 29.7517,
+    "lng": -95.3700,
+    "title": "DMV",
+    "category": "Personal",
+    "icon": "icons/personal.png",
+    "description": "Where I updated my driver's license last year."
+  },
+  {
+    "lat": 29.7599,
+    "lng": -95.3605,
+    "title": "R-Cubed Office",
+    "category": "Work",
+    "icon": "icons/work.png",
+    "description": "Office of R-CUBED Consulting."
+  },
+  {
+    "lat": 29.83713837956766,
+    "lng": -95.3990682647705,
+    "title": "testign",
+    "category": "Health",
+    "icon": "icons/health.png",
+    "description": "testign"
+  }
+]
